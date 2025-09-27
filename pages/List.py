@@ -34,8 +34,6 @@ init_session_state()
 
 # ---------------- Sidebar ----------------
 with st.sidebar:
-    st.title("📑 Influencer Checker")
-    st.divider()
     if st.button("↻ Refresh Data", use_container_width=True):
         st.cache_data.clear()
         st.session_state.data_loaded = False
