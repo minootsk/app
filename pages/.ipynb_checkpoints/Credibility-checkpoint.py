@@ -24,19 +24,13 @@ def init_session_state():
         "sheet_updated": False,
         "data_loaded": False,
         "pending_changes": None,
-        "new_influencers_df": None
+        "new_influencers_df": None,
+        "added_influencers": False
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 init_session_state()
-
-# --- Sidebar ---
-with st.sidebar:
-    if st.button("↻ Refresh Data", use_container_width=True):
-        st.cache_data.clear()
-        st.session_state.data_loaded = False
-        st.rerun()
 
 # --- Google Sheet Config ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1pFpU-ClSWJx2bFEdbZzaH47vedgtI8uxhDVXSKX0ZkE/edit"
@@ -114,14 +108,52 @@ if influencers_df is not None and not influencers_df.empty:
         st.session_state.editor_version += 1
         st.rerun()
 
+# --- Google Sheet update function ---
+@st.cache_data(ttl=300, show_spinner=False)
+def update_google_sheet(df, _worksheet_influencers, id_col, cred_col, comment_col):
+    df_to_write = df.copy()
+    if cred_col in df_to_write.columns:
+        df_to_write[cred_col] = df_to_write[cred_col].map({True: "True", False: "False"})
+    values = [df_to_write.columns.tolist()] + df_to_write.values.tolist()
+    _worksheet_influencers.clear()
+    _worksheet_influencers.update(values)
+    return True
+
+# --- Sidebar ---
+with st.sidebar:
+    if st.button("↻ Refresh Data", use_container_width=True):
+        st.cache_data.clear()
+        st.session_state.data_loaded = False
+        st.rerun()
+
+    st.markdown("---")
+    st.markdown("### ☁️ Google Sheet Actions")
+
+    if st.button("🔄 Update Google Sheet", use_container_width=True, type="primary"):
+        try:
+            with st.spinner("↺ Updating Google Sheets..."):
+                success = update_google_sheet(
+                    st.session_state.full_table,
+                    worksheet_influencers,
+                    id_col,
+                    cred_col,
+                    comment_col
+                )
+            if success:
+                st.success("✔️ Google Sheet updated successfully!")
+                st.session_state.sheet_updated = True
+                st.session_state.added_influencers = False
+                st.cache_data.clear()
+        except Exception as e:
+            st.error(f"❌ Failed to update Google Sheet: {e}")
+
 # --- SECTION 3: Excel-like Bulk Editor ---
 with st.expander("➕ Paste Single or Multiple Influencers Here", expanded=True):
     if st.session_state.new_influencers_df is None:
-        # Initialize 5 empty rows
         st.session_state.new_influencers_df = pd.DataFrame({
-            "ID": [""] * 2,
-            "Comment": [""] * 2,
-            "Credibility": [True] * 2
+            "ID": [""] * 5,
+            "Comment": [""] * 5,
+            "Credibility": [False] * 5
         })
 
     new_editor_df = st.data_editor(
@@ -130,31 +162,54 @@ with st.expander("➕ Paste Single or Multiple Influencers Here", expanded=True)
         column_config={
             "ID": st.column_config.TextColumn("ID"),
             "Comment": st.column_config.TextColumn("Comment"),
-            "Credibility": st.column_config.CheckboxColumn("Credibility")
+            "Credibility": st.column_config.CheckboxColumn("Credibility (default=❌ Rejected)")
         },
         hide_index=True,
-        num_rows="dynamic",  # <-- Allow adding rows
+        num_rows="dynamic",
         key="bulk_add_editor"
     )
 
-    if st.button("💾 Add Influencers to List", use_container_width=True):
-        # Remove empty rows
+    if st.button("💾 Add Influencers to List", type="primary"):
         new_rows = new_editor_df[new_editor_df["ID"].str.strip() != ""].copy()
         if not new_rows.empty:
             st.session_state.full_table = pd.concat([new_rows, st.session_state.full_table], ignore_index=True)
-            st.success(f"✔️ {len(new_rows)} influencer(s) added successfully!")
+            st.session_state.added_influencers = True
+            st.success(f"✔️ {len(new_rows)} influencer(s) added locally!")
+            st.warning("⚠️ Don’t forget to click **Update Google Sheet** in the sidebar to save changes permanently!")
+
             st.session_state.new_influencers_df = pd.DataFrame({
-                "Influencer ID": [""] * 5,
+                "ID": [""] * 5,
                 "Comment": [""] * 5,
-                "Credibility": [True] * 5
+                "Credibility": [False] * 5
             })
             st.session_state.editor_version += 1
-            st.rerun()
         else:
             st.warning("⚠️ Please enter at least one influencer ID to add.")
 
-# --- Filter Influencers ---
+# --- Scorecards Section ---
+st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("---")
+if st.session_state.full_table is not None and cred_col in st.session_state.full_table.columns:
+    approved_count = int(st.session_state.full_table[cred_col].sum())
+    rejected_count = int(len(st.session_state.full_table) - approved_count)
+
+    st.markdown(
+        f"""
+        <div style="display: flex; gap: 2rem; align-items: center; margin-bottom: 20px;">
+            <div style="background-color:#eafbea; padding:1rem; border-radius:10px; text-align:center; flex:1;">
+                <h4 style="margin:0;">✔️ Approved</h4>
+                <p style="font-size:1.5rem; margin:0;"><b>{approved_count}</b></p>
+            </div>
+            <div style="background-color:#fdecea; padding:1rem; border-radius:10px; text-align:center; flex:1;">
+                <h4 style="margin:0;">❌ Rejected</h4>
+                <p style="font-size:1.5rem; margin:0;"><b>{rejected_count}</b></p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# --- Filter Influencers ---
 st.markdown("### 🔍 Change Credibility")
 col1, col2 = st.columns(2)
 cred_labels = {"All": "All", True: "✔️ Approved", False: "❌ Rejected"}
@@ -215,36 +270,9 @@ else:
 
         if changes:
             st.session_state.pending_changes = updated_full
-            st.warning("⚠️ Changes are pending. Click 'Apply Changes' below to confirm.")
-            if st.button("✅ Apply Changes", use_container_width=True, type="primary"):
+            if st.button("✅ Apply Changes", type="primary"):
                 st.session_state.full_table = st.session_state.pending_changes
                 st.session_state.pending_changes = None
                 st.session_state.editor_version += 1
                 st.success(f"✔️ {len(set(changes))} row(s) updated locally")
-                st.rerun()
-
-# --- Update Google Sheet ---
-@st.cache_data(ttl=300, show_spinner=False)
-def update_google_sheet(df, _worksheet_influencers, id_col, cred_col, comment_col):
-    df_to_write = df.copy()
-    if cred_col in df_to_write.columns:
-        df_to_write[cred_col] = df_to_write[cred_col].map({True: "True", False: "False"})
-    values = [df_to_write.columns.tolist()] + df_to_write.values.tolist()
-    _worksheet_influencers.clear()
-    _worksheet_influencers.update(values)
-    return True
-
-# --- Sync Section ---
-st.markdown("---")
-st.markdown("### ☁️ Sync with Google Sheets")
-if st.button("🔄 Update Google Sheet", use_container_width=True, type="primary"):
-    try:
-        with st.spinner("↺ Updating Google Sheets..."):
-            success = update_google_sheet(st.session_state.full_table, worksheet_influencers, id_col, cred_col, comment_col)
-        if success:
-            st.success("✔️ Google Sheet updated successfully!")
-            st.session_state.sheet_updated = True
-            st.cache_data.clear()
-            st.rerun()
-    except Exception as e:
-        st.error(f"❌ Failed to update Google Sheet: {e}")
+                st.warning("⚠️ Don’t forget to click **Update Google Sheet** in the sidebar to save changes permanently!")
