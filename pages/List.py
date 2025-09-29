@@ -102,13 +102,44 @@ if uploaded_file:
             new_df = pd.read_csv(uploaded_file)
         else:
             new_df = pd.read_excel(uploaded_file)
+
+        # --- Normalize column headers ---
+        new_df.columns = (
+            new_df.columns.str.strip()
+            .str.lower()
+            .str.replace(r"[\s\-_]+", " ", regex=True)
+        )
+        rename_map = {
+            "id": "ID",
+            "link": "Link",
+            "followers": "Followers",
+            "follower": "Followers",
+            "post price": "Post price",
+            "avg view": "Avg View",
+            "avg views": "Avg View",
+            "ier": "IER",
+            "ie":"IE",
+            "avg like": "Avg like",
+            "avg likes": "Avg like",
+            "avg comment": "Avg comments",
+            "avg comments": "Avg comments",
+            "cpv": "CPV",
+            "category": "Category",
+        }
+        new_df.rename(columns=lambda x: rename_map.get(x, x), inplace=True)
+
+        # --- Ensure ID exists ---
         if "ID" not in new_df.columns:
             new_df.rename(columns={new_df.columns[0]: "ID"}, inplace=True)
+
         new_df["ID"] = new_df["ID"].astype(str).str.lstrip("@").str.strip()
+
+        # --- Convert numeric columns ---
         numeric_cols = ["Followers", "Post price", "Avg View", "CPV", "IER", "Avg like", "Avg comments"]
         for col in numeric_cols:
             if col in new_df.columns:
                 new_df[col] = pd.to_numeric(new_df[col], errors="coerce")
+
         st.session_state.new_df = new_df
 
     new_df = st.session_state.new_df
@@ -117,8 +148,8 @@ if uploaded_file:
     merged_df = new_df.merge(inf_df, on="ID", how="left", suffixes=("", "_sheet"))
     merged_df["Link"] = "https://www.instagram.com/" + merged_df["ID"]
 
-    rejected_df = merged_df[merged_df["Credibility"] == "false"][ ["ID", "Comment", "Link"] ]
-    unknown_df = merged_df[merged_df["Credibility"].isna()][ ["ID", "Link"] ]
+    rejected_df = merged_df[merged_df["Credibility"] == "false"][["ID", "Comment", "Link"]]
+    unknown_df = merged_df[merged_df["Credibility"].isna()][["ID", "Link"]]
     pending_ids = set(new_df["ID"]) - set(rejected_df["ID"]) - set(unknown_df["ID"])
 
     pending_df = new_df[new_df["ID"].isin(pending_ids)].copy()
@@ -188,20 +219,15 @@ if uploaded_file:
                     st.warning(f"No historical data found for {influencer_id}")
                     continue
 
-                # --- Sort by Publication date (Miladi) ---
                 influencer_history = influencer_history.sort_values(by="Publication date(Miladi)")
-
-                # --- Format Publication date for hover ---
                 influencer_history["Publication date(Miladi)"] = pd.to_datetime(influencer_history["Publication date(Miladi)"]).dt.strftime("%Y-%m-%d")
 
-                # --- Select Y-axis ---
                 y_axis_choice = st.selectbox(
                     f"Select Y-axis",
                     options=["Post Price", "Follower"],
                     key=f"y_axis_{influencer_id}"
                 )
 
-                # --- Plot line chart with Campaign name on X-axis and hover tooltip ---
                 fig = px.line(
                     influencer_history,
                     x="Campaign name",
@@ -210,10 +236,7 @@ if uploaded_file:
                     title=f"📊 {influencer_id} - {y_axis_choice} Over Time",
                     hover_data={"Publication date(Miladi)": True, y_axis_choice: True, "Campaign name": True}
                 )
-                fig.update_layout(
-                    xaxis_title="Campaign Name",
-                    yaxis_title=y_axis_choice
-                )
+                fig.update_layout(xaxis_title="Campaign Name", yaxis_title=y_axis_choice)
                 st.plotly_chart(fig, use_container_width=True)
 
         # -------- Export 20-column Excel --------
