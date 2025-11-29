@@ -210,7 +210,7 @@ if uploaded_file:
             st.markdown("### 📈 Compare History")
             for influencer_id in compare_df["ID"]:
                 if master_df is not None and "ID" in master_df.columns:
-                    influencer_history = master_df[master_df["ID"].astype(str) == str(influencer_id)].dropna(subset=["Publication date(Miladi)"])
+                    influencer_history = master_df[master_df["ID"].astype(str) == str(influencer_id)].dropna(subset=["Publication Date (Gregorian)"])
                 else:
                     st.warning(f"Master sheet data not available for {influencer_id}")
                     continue
@@ -219,8 +219,8 @@ if uploaded_file:
                     st.warning(f"No historical data found for {influencer_id}")
                     continue
 
-                influencer_history = influencer_history.sort_values(by="Publication date(Miladi)")
-                influencer_history["Publication date(Miladi)"] = pd.to_datetime(influencer_history["Publication date(Miladi)"]).dt.strftime("%Y-%m-%d")
+                influencer_history = influencer_history.sort_values(by="Publication Date (Gregorian)")
+                influencer_history["Publication Date (Gregorian)"] = pd.to_datetime(influencer_history["Publication Date (Gregorian)"]).dt.strftime("%Y-%m-%d")
 
                 y_axis_choice = st.selectbox(
                     f"Select Y-axis",
@@ -234,7 +234,7 @@ if uploaded_file:
                     y=y_axis_choice,
                     markers=True,
                     title=f"📊 {influencer_id} - {y_axis_choice} Over Time",
-                    hover_data={"Publication date(Miladi)": True, y_axis_choice: True, "Campaign name": True}
+                    hover_data={"Publication Date (Gregorian)": True, y_axis_choice: True, "Campaign name": True}
                 )
                 fig.update_layout(xaxis_title="Campaign Name", yaxis_title=y_axis_choice)
                 st.plotly_chart(fig, use_container_width=True)
