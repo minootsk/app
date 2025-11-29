@@ -50,6 +50,37 @@ def format_number(x):
     except:
         return str(x)
 
+# ------------------------------------------
+# Column Name Variations (Flexible Mapping)
+# ------------------------------------------
+COLUMN_ALIASES = {
+    "ID": ["id", "username", "user", "profile", "handle", "account", "instagram", "insta"],
+    "Followers": ["followers", "follower", "subs", "audience", "fans", "total followers"],
+    "Post price": ["post price", "price", "rate", "cost", "fee","Post Price (t)"],
+    "Avg View": ["avg view", "average views", "views", "impressions", "reach"],
+    "IER": ["ier", "engagement rate", "er", "eng rate", "ier%"],
+    "Avg like": ["avg like", "average likes", "likes", "like"],
+    "Avg comments": ["avg comment", "avg comments", "comments", "comment", "average comments"],
+    "Category": ["category", "niche", "genre", "type"],
+    "CPV": ["cpv", "cost per view"]
+}
+
+
+def map_column_name(col: str):
+    clean = col.lower().strip().replace("_", " ").replace("-", " ")
+
+    # Exact match first
+    for target, aliases in COLUMN_ALIASES.items():
+        if clean in aliases:
+            return target
+
+    # Fallback contains pattern
+    for target, aliases in COLUMN_ALIASES.items():
+        if any(alias in clean for alias in aliases):
+            return target
+
+    return col
+
 # ---------------- Google Sheets ----------------
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1pFpU-ClSWJx2bFEdbZzaH47vedgtI8uxhDVXSKX0ZkE/edit#gid=92547169"
 SHEET_ID = re.search(r"/d/([a-zA-Z0-9-_]+)", SHEET_URL).group(1)
@@ -103,30 +134,8 @@ if uploaded_file:
         else:
             new_df = pd.read_excel(uploaded_file)
 
-        # --- Normalize column headers ---
-        new_df.columns = (
-            new_df.columns.str.strip()
-            .str.lower()
-            .str.replace(r"[\s\-_]+", " ", regex=True)
-        )
-        rename_map = {
-            "id": "ID",
-            "link": "Link",
-            "followers": "Followers",
-            "follower": "Followers",
-            "post price": "Post price",
-            "avg view": "Avg View",
-            "avg views": "Avg View",
-            "ier": "IER",
-            "ie":"IE",
-            "avg like": "Avg like",
-            "avg likes": "Avg like",
-            "avg comment": "Avg comments",
-            "avg comments": "Avg comments",
-            "cpv": "CPV",
-            "category": "Category",
-        }
-        new_df.rename(columns=lambda x: rename_map.get(x, x), inplace=True)
+        # --- Normalize & Map Column Headers ---
+        new_df.columns = [map_column_name(col) for col in new_df.columns]
 
         # --- Ensure ID exists ---
         if "ID" not in new_df.columns:
@@ -148,7 +157,7 @@ if uploaded_file:
     merged_df = new_df.merge(inf_df, on="ID", how="left", suffixes=("", "_sheet"))
     merged_df["Link"] = "https://www.instagram.com/" + merged_df["ID"]
 
-    rejected_df = merged_df[merged_df["Credibility"] == "false"][["ID", "Comment", "Link"]]
+    rejected_df = merged_df[merged_df["Credibility"] == "false"]["ID", "Comment", "Link"]
     unknown_df = merged_df[merged_df["Credibility"].isna()][["ID", "Link"]]
     pending_ids = set(new_df["ID"]) - set(rejected_df["ID"]) - set(unknown_df["ID"])
 
@@ -203,7 +212,7 @@ if uploaded_file:
         # -------- Lazy Load Master Sheet Safely --------
         compare_df = pending_edited[pending_edited["Compare"]]
         if not compare_df.empty:
-            if "master_df" not in st.session_state or st.session_state.master_df is None:
+            if st.session_state.master_df is None:
                 st.session_state.master_df = load_master_sheet()
             master_df = st.session_state.master_df
 
