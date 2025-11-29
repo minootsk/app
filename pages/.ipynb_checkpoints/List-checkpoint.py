@@ -51,6 +51,29 @@ def format_number(x):
     except:
         return str(x)
 
+# ---------------- Date Cleaning Helper ----------------
+def clean_date_column(df, col_name):
+    """
+    Safely converts a date column.
+    - Converts with errors='coerce'
+    - Replaces invalid dates with ""
+    - Returns cleaned df and list of invalid rows
+    """
+    if col_name not in df.columns:
+        return df, []
+
+    raw_series = df[col_name]
+    converted = pd.to_datetime(raw_series, errors="coerce")
+
+    # Identify invalid rows
+    invalid_mask = converted.isna() & raw_series.notna() & (raw_series != "")
+    invalid_rows = df[invalid_mask][col_name].tolist()
+
+    # Replace NaT with ""
+    df[col_name] = converted.dt.strftime("%Y-%m-%d").fillna("")
+
+    return df, invalid_rows
+
 # ---------------- Google Sheets ----------------
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1pFpU-ClSWJx2bFEdbZzaH47vedgtI8uxhDVXSKX0ZkE/edit#gid=92547169"
 SHEET_ID = re.search(r"/d/([a-zA-Z0-9-_]+)", SHEET_URL).group(1)
@@ -104,14 +127,13 @@ if uploaded_file:
         else:
             new_df = pd.read_excel(uploaded_file)
 
-        # --- Normalize column headers ---
+        # Normalize headers
         new_df.columns = (
             new_df.columns.str.strip()
             .str.lower()
             .str.replace(r"[\s\-_]+", " ", regex=True)
         )
 
-        # -------- NEW: List-Based Rename Groups --------
         rename_groups = {
             "ID": ["id"],
             "Link": ["link"],
@@ -126,7 +148,6 @@ if uploaded_file:
             "Category": ["category"],
         }
 
-        # Flatten groups into rename_map
         rename_map = {
             alias: canonical
             for canonical, aliases in rename_groups.items()
@@ -135,13 +156,12 @@ if uploaded_file:
 
         new_df.rename(columns=lambda x: rename_map.get(x, x), inplace=True)
 
-        # --- Ensure ID exists ---
+        # Ensure ID exists
         if "ID" not in new_df.columns:
             new_df.rename(columns={new_df.columns[0]: "ID"}, inplace=True)
 
         new_df["ID"] = new_df["ID"].astype(str).str.lstrip("@").str.strip()
 
-        # --- Convert numeric columns ---
         numeric_cols = ["Followers", "Post price", "Avg View", "CPV", "IER", "Avg like", "Avg comments"]
         for col in numeric_cols:
             if col in new_df.columns:
@@ -207,17 +227,19 @@ if uploaded_file:
             key="pending_editor"
         )
 
-        # -------- Lazy Load Master Sheet Safely --------
+        # -------- Lazy Load Master Sheet + Clean Date Column --------
         compare_df = pending_edited[pending_edited["Compare"]]
         if not compare_df.empty:
             if "master_df" not in st.session_state or st.session_state.master_df is None:
                 st.session_state.master_df = load_master_sheet()
+
             master_df = st.session_state.master_df
 
             st.markdown("### 📈 Compare History")
+
             for influencer_id in compare_df["ID"]:
                 if master_df is not None and "ID" in master_df.columns:
-                    influencer_history = master_df[master_df["ID"].astype(str) == str(influencer_id)].dropna(subset=["Publication date(Miladi)"])
+                    influencer_history = master_df[master_df["ID"].astype(str) == str(influencer_id)]
                 else:
                     st.warning(f"Master sheet data not available for {influencer_id}")
                     continue
@@ -226,8 +248,25 @@ if uploaded_file:
                     st.warning(f"No historical data found for {influencer_id}")
                     continue
 
+                # -------- CLEAN DATE HERE --------
+                influencer_history, invalid_rows = clean_date_column(
+                    influencer_history.copy(), 
+                    "Publication date(Miladi)"
+                )
+
+                if invalid_rows:
+                    st.warning(
+                        f"⚠️ {len(invalid_rows)} invalid date(s) found for {influencer_id}: {invalid_rows}"
+                    )
+
+                # Drop empty dates from chart (optional but recommended)
+                influencer_history = influencer_history[influencer_history["Publication date(Miladi)"] != ""]
+
+                if influencer_history.empty:
+                    st.warning(f"All date entries invalid for {influencer_id}")
+                    continue
+
                 influencer_history = influencer_history.sort_values(by="Publication date(Miladi)")
-                influencer_history["Publication date(Miladi)"] = pd.to_datetime(influencer_history["Publication date(Miladi)"]).dt.strftime("%Y-%m-%d")
 
                 y_axis_choice = st.selectbox(
                     f"Select Y-axis",
@@ -281,8 +320,14 @@ if uploaded_file:
 
     # ---------------- Rejected Tab ----------------
     with tabs[1]:
-        st.dataframe(rejected_df, use_container_width=True, hide_index=True,
-            column_config={"Link": st.column_config.LinkColumn("Instagram", display_text="View Profile")})
+        st.dataframe(
+            rejected_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Link": st.column_config.LinkColumn("Instagram", display_text="View Profile")
+            }
+        )
 
     # ---------------- Unknown Tab ----------------
     with tabs[2]:
