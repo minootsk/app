@@ -56,7 +56,7 @@ def format_number(x):
 COLUMN_ALIASES = {
     "ID": ["id", "username", "user", "profile", "handle", "account", "instagram", "insta"],
     "Followers": ["followers", "follower", "subs", "audience", "fans", "total followers"],
-    "Post price": ["post price", "price", "rate", "cost", "fee","Post Price (t)"],
+    "Post price": ["post price", "price", "rate", "cost", "fee"],
     "Avg View": ["avg view", "average views", "views", "impressions", "reach"],
     "IER": ["ier", "engagement rate", "er", "eng rate", "ier%"],
     "Avg like": ["avg like", "average likes", "likes", "like"],
@@ -157,7 +157,7 @@ if uploaded_file:
     merged_df = new_df.merge(inf_df, on="ID", how="left", suffixes=("", "_sheet"))
     merged_df["Link"] = "https://www.instagram.com/" + merged_df["ID"]
 
-    rejected_df = merged_df[merged_df["Credibility"] == "false"]["ID", "Comment", "Link"]
+    rejected_df = merged_df[merged_df["Credibility"] == "false"][["ID", "Comment", "Link"]]
     unknown_df = merged_df[merged_df["Credibility"].isna()][["ID", "Link"]]
     pending_ids = set(new_df["ID"]) - set(rejected_df["ID"]) - set(unknown_df["ID"])
 
