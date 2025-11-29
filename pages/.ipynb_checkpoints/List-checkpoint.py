@@ -30,6 +30,7 @@ def init_session_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
 init_session_state()
 
 # ---------------- Sidebar ----------------
@@ -109,23 +110,29 @@ if uploaded_file:
             .str.lower()
             .str.replace(r"[\s\-_]+", " ", regex=True)
         )
-        rename_map = {
-            "id": "ID",
-            "link": "Link",
-            "followers": "Followers",
-            "follower": "Followers",
-            "post price": "Post price",
-            "avg view": "Avg View",
-            "avg views": "Avg View",
-            "ier": "IER",
-            "ie":"IE",
-            "avg like": "Avg like",
-            "avg likes": "Avg like",
-            "avg comment": "Avg comments",
-            "avg comments": "Avg comments",
-            "cpv": "CPV",
-            "category": "Category",
+
+        # -------- NEW: List-Based Rename Groups --------
+        rename_groups = {
+            "ID": ["id"],
+            "Link": ["link"],
+            "Followers": ["followers", "follower"],
+            "Post price": ["post price"],
+            "Avg View": ["avg view", "avg views"],
+            "IER": ["ier"],
+            "IE": ["ie"],
+            "Avg like": ["avg like", "avg likes"],
+            "Avg comments": ["avg comment", "avg comments"],
+            "CPV": ["cpv"],
+            "Category": ["category"],
         }
+
+        # Flatten groups into rename_map
+        rename_map = {
+            alias: canonical
+            for canonical, aliases in rename_groups.items()
+            for alias in aliases
+        }
+
         new_df.rename(columns=lambda x: rename_map.get(x, x), inplace=True)
 
         # --- Ensure ID exists ---
