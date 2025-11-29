@@ -4,7 +4,24 @@ import hashlib
 import re
 from utils import get_gsheets_client, get_worksheet_by_key, make_unique_headers
 
+# ----------------------------------------------------------------------
+# 🔧 Helper: Normalize Credibility Column (Fixes Your TypeError)
+# ----------------------------------------------------------------------
+def normalize_credibility(df):
+    if "Credibility" in df.columns:
+        df["Credibility"] = (
+            df["Credibility"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .map({"true": True, "false": False})
+            .fillna(False)
+        )
+    return df
+
+# ----------------------------------------------------------------------
 # --- Page config ---
+# ----------------------------------------------------------------------
 st.set_page_config(
     page_title="Influencer Checker",
     layout="wide",
@@ -15,7 +32,9 @@ st.set_page_config(
 # --- Current page in session ---
 st.session_state.current_page = 'credibility'
 
+# ----------------------------------------------------------------------
 # --- Session state initialization ---
+# ----------------------------------------------------------------------
 def init_session_state():
     defaults = {
         "full_table": None,
@@ -30,14 +49,19 @@ def init_session_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
 init_session_state()
 
+# ----------------------------------------------------------------------
 # --- Google Sheet Config ---
+# ----------------------------------------------------------------------
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1pFpU-ClSWJx2bFEdbZzaH47vedgtI8uxhDVXSKX0ZkE/edit"
 INF_SHEET = "Influencers List"
 SHEET_ID = re.search(r"/d/([a-zA-Z0-9-_]+)", SHEET_URL).group(1)
 
+# ----------------------------------------------------------------------
 # --- Connect to Google Sheet ---
+# ----------------------------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def get_worksheet():
     client = get_gsheets_client()
@@ -49,7 +73,9 @@ except Exception as e:
     st.error(f"❌ Failed to connect to Google Sheets: {e}")
     st.stop()
 
+# ----------------------------------------------------------------------
 # --- Load sheet version ---
+# ----------------------------------------------------------------------
 @st.cache_data(ttl=60, show_spinner=False)
 def get_sheet_version(_ws):
     all_values = _ws.get_all_values()
@@ -57,7 +83,9 @@ def get_sheet_version(_ws):
     version_str = f"{len(all_values)}-{last_row}"
     return hashlib.md5(version_str.encode()).hexdigest()
 
+# ----------------------------------------------------------------------
 # --- Load sheet data ---
+# ----------------------------------------------------------------------
 @st.cache_data(ttl=120, show_spinner="↺ Loading data from Google Sheets...")
 def load_data(_worksheet_influencers):
     data = _worksheet_influencers.get_all_values()
@@ -79,10 +107,7 @@ def load_data(_worksheet_influencers):
     cred_col = safe_find_column(df, "Credibility", "Credibility")
     comment_col = safe_find_column(df, "Comment", "Comment")
 
-    if cred_col in df.columns:
-        df[cred_col] = df[cred_col].replace(
-            {"TRUE": True, "True": True, "true": True, "FALSE": False, "False": False, "false": False}
-        ).fillna(False)
+    df = normalize_credibility(df)
 
     return df, id_col, cred_col, comment_col
 
@@ -93,33 +118,41 @@ except Exception as e:
     st.error(f"❌ Error loading data: {e}")
     st.stop()
 
+# ----------------------------------------------------------------------
 # --- Initialize full table ---
+# ----------------------------------------------------------------------
 if influencers_df is not None and not influencers_df.empty:
     if st.session_state.full_table is None:
         needed_cols = [c for c in [id_col, comment_col, cred_col] if c in influencers_df.columns]
-        st.session_state.full_table = influencers_df[needed_cols].copy()
+        st.session_state.full_table = normalize_credibility(influencers_df[needed_cols].copy())
 
     if st.session_state.sheet_version is None:
         st.session_state.sheet_version = sheet_version
     elif st.session_state.sheet_version != sheet_version:
         needed_cols = [c for c in [id_col, comment_col, cred_col] if c in influencers_df.columns]
-        st.session_state.full_table = influencers_df[needed_cols].copy()
+        st.session_state.full_table = normalize_credibility(influencers_df[needed_cols].copy())
         st.session_state.sheet_version = sheet_version
         st.session_state.editor_version += 1
         st.rerun()
 
+# ----------------------------------------------------------------------
 # --- Google Sheet update function ---
+# ----------------------------------------------------------------------
 @st.cache_data(ttl=300, show_spinner=False)
 def update_google_sheet(df, _worksheet_influencers, id_col, cred_col, comment_col):
     df_to_write = df.copy()
-    if cred_col in df_to_write.columns:
-        df_to_write[cred_col] = df_to_write[cred_col].map({True: "True", False: "False"})
+    df_to_write = normalize_credibility(df_to_write)
+
+    df_to_write["Credibility"] = df_to_write["Credibility"].map({True: "True", False: "False"})
+
     values = [df_to_write.columns.tolist()] + df_to_write.values.tolist()
     _worksheet_influencers.clear()
     _worksheet_influencers.update(values)
     return True
 
+# ----------------------------------------------------------------------
 # --- Sidebar ---
+# ----------------------------------------------------------------------
 with st.sidebar:
     if st.button("↻ Refresh Data", use_container_width=True):
         st.cache_data.clear()
@@ -147,7 +180,9 @@ with st.sidebar:
         except Exception as e:
             st.error(f"❌ Failed to update Google Sheet: {e}")
 
+# ----------------------------------------------------------------------
 # --- SECTION 3: Excel-like Bulk Editor ---
+# ----------------------------------------------------------------------
 with st.expander("➕ Paste Single or Multiple Influencers Here", expanded=True):
     if st.session_state.new_influencers_df is None:
         st.session_state.new_influencers_df = pd.DataFrame({
@@ -171,8 +206,13 @@ with st.expander("➕ Paste Single or Multiple Influencers Here", expanded=True)
 
     if st.button("💾 Add Influencers to List", type="primary"):
         new_rows = new_editor_df[new_editor_df["ID"].str.strip() != ""].copy()
+        new_rows = normalize_credibility(new_rows)
+
         if not new_rows.empty:
-            st.session_state.full_table = pd.concat([new_rows, st.session_state.full_table], ignore_index=True)
+            st.session_state.full_table = pd.concat(
+                [new_rows, st.session_state.full_table],
+                ignore_index=True
+            )
             st.session_state.added_influencers = True
             st.success(f"✔️ {len(new_rows)} influencer(s) added locally!")
             st.warning("⚠️ Don’t forget to click **Update Google Sheet** in the sidebar to save changes permanently!")
@@ -186,64 +226,83 @@ with st.expander("➕ Paste Single or Multiple Influencers Here", expanded=True)
         else:
             st.warning("⚠️ Please enter at least one influencer ID to add.")
 
-# --- Scorecards Section ---
+# ----------------------------------------------------------------------
+# --- Scorecards Section (Fixes Your Crash Here)
+# ----------------------------------------------------------------------
+st.session_state.full_table = normalize_credibility(st.session_state.full_table)
+
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("---")
-if st.session_state.full_table is not None and cred_col in st.session_state.full_table.columns:
-    approved_count = int(st.session_state.full_table[cred_col].sum())
-    rejected_count = int(len(st.session_state.full_table) - approved_count)
 
-    st.markdown(
-        f"""
-        <div style="display: flex; gap: 2rem; align-items: center; margin-bottom: 20px;">
-            <div style="background-color:#eafbea; padding:1rem; border-radius:10px; text-align:center; flex:1;">
-                <h4 style="margin:0;">✔️ Approved</h4>
-                <p style="font-size:1.5rem; margin:0;"><b>{approved_count}</b></p>
-            </div>
-            <div style="background-color:#fdecea; padding:1rem; border-radius:10px; text-align:center; flex:1;">
-                <h4 style="margin:0;">❌ Rejected</h4>
-                <p style="font-size:1.5rem; margin:0;"><b>{rejected_count}</b></p>
-            </div>
+approved_count = int(st.session_state.full_table["Credibility"].sum())
+rejected_count = int(len(st.session_state.full_table) - approved_count)
+
+st.markdown(
+    f"""
+    <div style="display: flex; gap: 2rem; align-items: center; margin-bottom: 20px;">
+        <div style="background-color:#eafbea; padding:1rem; border-radius:10px; text-align:center; flex:1;">
+            <h4 style="margin:0;">✔️ Approved</h4>
+            <p style="font-size:1.5rem; margin:0;"><b>{approved_count}</b></p>
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+        <div style="background-color:#fdecea; padding:1rem; border-radius:10px; text-align:center; flex:1;">
+            <h4 style="margin:0;">❌ Rejected</h4>
+            <p style="font-size:1.5rem; margin:0;"><b>{rejected_count}</b></p>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
+# ----------------------------------------------------------------------
 # --- Filter Influencers ---
+# ----------------------------------------------------------------------
 st.markdown("### 🔍 Change Credibility")
 col1, col2 = st.columns(2)
 cred_labels = {"All": "All", True: "✔️ Approved", False: "❌ Rejected"}
+
 with col1:
     cred_filter = st.selectbox(
         "Filter by Credibility",
         options=["All", True, False],
         format_func=lambda x: cred_labels[x]
     )
+
 with col2:
-    if st.session_state.full_table is not None and comment_col in st.session_state.full_table.columns:
-        comment_options = ["All"] + sorted(st.session_state.full_table[comment_col].dropna().unique().tolist())
+    if comment_col in st.session_state.full_table.columns:
+        comment_options = ["All"] + sorted(
+            st.session_state.full_table[comment_col].dropna().unique().tolist()
+        )
     else:
         comment_options = ["All"]
     comment_filter = st.selectbox("Filter by Comment", options=comment_options)
 
+# ----------------------------------------------------------------------
 # --- Apply filters ---
+# ----------------------------------------------------------------------
 def get_filtered_table():
     df = st.session_state.full_table
+    df = normalize_credibility(df)
+
     mask = pd.Series(True, index=df.index)
-    if cred_filter != "All" and cred_col in df.columns:
-        mask &= df[cred_col] == cred_filter
-    if comment_filter != "All" and comment_col in df.columns:
+
+    if cred_filter != "All":
+        mask &= df["Credibility"] == cred_filter
+
+    if comment_filter != "All":
         mask &= df[comment_col] == comment_filter
+
     result = df[mask].copy()
-    if cred_col in result.columns:
-        result["Status"] = result[cred_col].map({True: "✔️ Approved", False: "❌ Rejected"})
+    result["Status"] = result["Credibility"].map({True: "✔️ Approved", False: "❌ Rejected"})
     return result
 
 filtered_df = get_filtered_table()
 display_df = filtered_df.copy()
 
+# ----------------------------------------------------------------------
 # --- Edit Influencer Data ---
+# ----------------------------------------------------------------------
 editor_key = f"main_editor_v{st.session_state.editor_version}"
+
 if display_df.empty:
     st.info("ℹ️ No influencers match the current filters")
 else:
@@ -257,19 +316,24 @@ else:
 
     if edited_table is not None and not edited_table.empty:
         updated_full = st.session_state.full_table.copy()
+        updated_full = normalize_credibility(updated_full)
+
         changes = []
         for idx, row in edited_table.iterrows():
             if idx not in updated_full.index:
                 continue
-            if cred_col in updated_full.columns and row.get(cred_col) is not None and updated_full.at[idx, cred_col] != row[cred_col]:
-                updated_full.at[idx, cred_col] = row[cred_col]
+
+            if updated_full.at[idx, "Credibility"] != row["Credibility"]:
+                updated_full.at[idx, "Credibility"] = row["Credibility"]
                 changes.append(idx)
-            if comment_col in updated_full.columns and row.get(comment_col) is not None and updated_full.at[idx, comment_col] != row[comment_col]:
+
+            if updated_full.at[idx, comment_col] != row[comment_col]:
                 updated_full.at[idx, comment_col] = row[comment_col]
                 changes.append(idx)
 
         if changes:
-            st.session_state.pending_changes = updated_full
+            st.session_state.pending_changes = normalize_credibility(updated_full)
+
             if st.button("✅ Apply Changes", type="primary"):
                 st.session_state.full_table = st.session_state.pending_changes
                 st.session_state.pending_changes = None
